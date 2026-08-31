@@ -1,0 +1,489 @@
+<meta charset="UTF-8">
+<title>Channel Color Chooser</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #f4f5f7;
+    --surface: #ffffff;
+    --surface-sunken: #ebedf0;
+    --border: #d9dce1;
+    --text: #1b1e23;
+    --text-muted: #6b7280;
+    --accent: #45577a;
+    --accent-soft: #dde3ee;
+    --focus-ring: #45577a;
+    --shadow: 0 1px 2px rgba(20, 24, 33, 0.04), 0 8px 24px rgba(20, 24, 33, 0.06);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #14161a;
+      --surface: #1c1f25;
+      --surface-sunken: #23262d;
+      --border: #33373f;
+      --text: #e8e9ec;
+      --text-muted: #9198a3;
+      --accent: #93a8d1;
+      --accent-soft: #2a3142;
+      --focus-ring: #93a8d1;
+      --shadow: 0 1px 2px rgba(0, 0, 0, 0.25), 0 12px 30px rgba(0, 0, 0, 0.35);
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --bg: #14161a;
+    --surface: #1c1f25;
+    --surface-sunken: #23262d;
+    --border: #33373f;
+    --text: #e8e9ec;
+    --text-muted: #9198a3;
+    --accent: #93a8d1;
+    --accent-soft: #2a3142;
+    --focus-ring: #93a8d1;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.25), 0 12px 30px rgba(0, 0, 0, 0.35);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background: var(--bg);
+    color: var(--text);
+    font-family: "Manrope", ui-sans-serif, system-ui, sans-serif;
+    display: flex;
+    justify-content: center;
+    padding: 48px 20px;
+  }
+
+  .panel {
+    width: 100%;
+    max-width: 460px;
+    display: flex;
+    flex-direction: column;
+    gap: 28px;
+  }
+
+  .eyebrow {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin: 0 0 4px;
+  }
+
+  h1 {
+    font-size: 26px;
+    font-weight: 800;
+    letter-spacing: -0.01em;
+    margin: 0;
+    text-wrap: balance;
+  }
+
+  .intro {
+    margin: 10px 0 0;
+    color: var(--text-muted);
+    font-size: 14px;
+    line-height: 1.6;
+    max-width: 46ch;
+  }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    box-shadow: var(--shadow);
+    padding: 28px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 22px;
+  }
+
+  .controls {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+  }
+
+  .controls label {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+    flex-shrink: 0;
+  }
+
+  .controls input[type="number"] {
+    width: 84px;
+    padding: 9px 10px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--surface-sunken);
+    color: var(--text);
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 15px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .controls input[type="number"]:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 1px;
+  }
+
+  .controls .spacer { flex: 1; }
+
+  .controls .angle-readout {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 12px;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .wheel-wrap {
+    position: relative;
+    width: min(340px, 78vw);
+    aspect-ratio: 1 / 1;
+    touch-action: none;
+  }
+
+  .wheel-wrap canvas {
+    width: 100%;
+    height: 100%;
+    display: block;
+    cursor: grab;
+    border-radius: 50%;
+  }
+
+  .wheel-wrap.dragging canvas {
+    cursor: grabbing;
+  }
+
+  .hint {
+    font-size: 12px;
+    color: var(--text-muted);
+    text-align: center;
+    margin: 0;
+  }
+
+  table.readout {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+
+  table.readout th {
+    text-align: left;
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    padding: 0 8px 8px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  table.readout td {
+    padding: 9px 8px;
+    border-bottom: 1px solid var(--border);
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-variant-numeric: tabular-nums;
+    color: var(--text);
+  }
+
+  table.readout tr:last-child td {
+    border-bottom: none;
+  }
+
+  .swatch {
+    width: 18px;
+    height: 18px;
+    border-radius: 5px;
+    border: 1px solid var(--border);
+    display: inline-block;
+    vertical-align: middle;
+  }
+
+  .swatch-cell {
+    width: 32px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; }
+  }
+</style>
+
+<div class="panel">
+  <div>
+    <p class="eyebrow">Color wheel · rotating spokes</p>
+    <h1>Channel Color Chooser</h1>
+    <p class="intro">Enter the number of visible channels and spokes will space themselves evenly around the color wheel. Drag any spoke to rotate the whole color set.</p>
+  </div>
+
+  <div class="card">
+    <div class="controls">
+      <label for="spoke-count">Channels</label>
+      <input id="spoke-count" type="number" min="1" max="48" step="1" value="3" inputmode="numeric" />
+      <span class="spacer"></span>
+      <span class="angle-readout" id="angle-readout">offset 0°</span>
+    </div>
+
+    <div class="wheel-wrap" id="wheel-wrap">
+      <canvas id="wheel" aria-label="Interactive color wheel with rotating spokes"></canvas>
+    </div>
+
+    <p class="hint">Drag inside the wheel to rotate</p>
+
+    <table class="readout" id="readout">
+      <thead>
+        <tr>
+          <th class="swatch-cell"></th>
+          <th>Spoke</th>
+          <th>Angle</th>
+          <th>Hex</th>
+          <th>RGB</th>
+        </tr>
+      </thead>
+      <tbody id="readout-body"></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+(function () {
+  const canvas = document.getElementById('wheel');
+  const wrap = document.getElementById('wheel-wrap');
+  const ctx = canvas.getContext('2d');
+  const countInput = document.getElementById('spoke-count');
+  const readoutBody = document.getElementById('readout-body');
+  const angleReadout = document.getElementById('angle-readout');
+
+  let logicalSize = 340;
+  let dpr = Math.max(1, window.devicePixelRatio || 1);
+  let radius = logicalSize / 2 - 6;
+  let center = logicalSize / 2;
+  let wheelImage = null; // offscreen canvas holding the static hue/sat wheel
+
+  let spokeCount = 3;
+  let baseAngle = 0; // degrees, 0 = up, clockwise+
+  let dragging = false;
+  let dragIndex = 0;
+
+  function normalize(deg) {
+    let d = deg % 360;
+    if (d < 0) d += 360;
+    return d;
+  }
+
+  function spokeAngles() {
+    const spacing = 360 / spokeCount;
+    const angles = [];
+    for (let i = 0; i < spokeCount; i++) {
+      angles.push(normalize(baseAngle + i * spacing));
+    }
+    return angles;
+  }
+
+  function hsvToRgb(h, s, v) {
+    const c = v * s;
+    const hp = h / 60;
+    const x = c * (1 - Math.abs((hp % 2) - 1));
+    let r = 0, g = 0, b = 0;
+    if (hp >= 0 && hp < 1) { r = c; g = x; b = 0; }
+    else if (hp < 2) { r = x; g = c; b = 0; }
+    else if (hp < 3) { r = 0; g = c; b = x; }
+    else if (hp < 4) { r = 0; g = x; b = c; }
+    else if (hp < 5) { r = x; g = 0; b = c; }
+    else { r = c; g = 0; b = x; }
+    const m = v - c;
+    return [
+      Math.round((r + m) * 255),
+      Math.round((g + m) * 255),
+      Math.round((b + m) * 255)
+    ];
+  }
+
+  function toHex(rgb) {
+    return '#' + rgb.map(v => v.toString(16).padStart(2, '0')).join('');
+  }
+
+  function buildWheelImage() {
+    const size = Math.round(logicalSize * dpr);
+    const off = document.createElement('canvas');
+    off.width = size;
+    off.height = size;
+    const octx = off.getContext('2d');
+    const img = octx.createImageData(size, size);
+    const cx = size / 2;
+    const cy = size / 2;
+    const r = radius * dpr;
+
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        const dx = x - cx;
+        const dy = y - cy;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        const idx = (y * size + x) * 4;
+        if (dist <= r) {
+          const theta = Math.atan2(dy, dx) * 180 / Math.PI;
+          const hue = normalize(theta + 90);
+          const sat = dist / r;
+          const [rr, gg, bb] = hsvToRgb(hue, sat, 1);
+          img.data[idx] = rr;
+          img.data[idx + 1] = gg;
+          img.data[idx + 2] = bb;
+          img.data[idx + 3] = 255;
+        } else {
+          img.data[idx + 3] = 0;
+        }
+      }
+    }
+    octx.putImageData(img, 0, 0);
+    wheelImage = off;
+  }
+
+  function resize() {
+    const rect = wrap.getBoundingClientRect();
+    logicalSize = rect.width;
+    dpr = Math.max(1, window.devicePixelRatio || 1);
+    radius = logicalSize / 2 - 6;
+    center = logicalSize / 2;
+    canvas.width = Math.round(logicalSize * dpr);
+    canvas.height = Math.round(logicalSize * dpr);
+    buildWheelImage();
+    draw();
+  }
+
+  function draw() {
+    const size = canvas.width;
+    ctx.clearRect(0, 0, size, size);
+    if (wheelImage) ctx.drawImage(wheelImage, 0, 0, size, size);
+
+    const cx = size / 2;
+    const cy = size / 2;
+    const r = radius * dpr;
+    const lineWidth = Math.max(2, 2.5 * dpr);
+
+    const isDark = getComputedStyle(document.documentElement).getPropertyValue('--text').trim().startsWith('#e8');
+
+    spokeAngles().forEach((a) => {
+      const theta = (a - 90) * Math.PI / 180;
+      const ex = cx + Math.cos(theta) * r;
+      const ey = cy + Math.sin(theta) * r;
+
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.lineTo(ex, ey);
+      ctx.lineWidth = lineWidth + 2 * dpr;
+      ctx.strokeStyle = isDark ? 'rgba(20,22,26,0.65)' : 'rgba(255,255,255,0.65)';
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.lineTo(ex, ey);
+      ctx.lineWidth = lineWidth;
+      ctx.strokeStyle = isDark ? '#f2f3f5' : '#1b1e23';
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.arc(ex, ey, 5 * dpr, 0, Math.PI * 2);
+      ctx.fillStyle = isDark ? '#f2f3f5' : '#1b1e23';
+      ctx.fill();
+    });
+
+    ctx.beginPath();
+    ctx.arc(cx, cy, 4 * dpr, 0, Math.PI * 2);
+    ctx.fillStyle = isDark ? '#f2f3f5' : '#1b1e23';
+    ctx.fill();
+  }
+
+  function updateReadout() {
+    const angles = spokeAngles();
+    readoutBody.innerHTML = '';
+    angles.forEach((a, i) => {
+      const rgb = hsvToRgb(a, 1, 1);
+      const hex = toHex(rgb);
+      const tr = document.createElement('tr');
+      tr.innerHTML =
+        '<td class="swatch-cell"><span class="swatch" style="background:' + hex + '"></span></td>' +
+        '<td>' + (i + 1) + '</td>' +
+        '<td>' + a.toFixed(1) + '°</td>' +
+        '<td>' + hex + '</td>' +
+        '<td>' + rgb.join(', ') + '</td>';
+      readoutBody.appendChild(tr);
+    });
+    angleReadout.textContent = 'offset ' + normalize(baseAngle).toFixed(1) + '°';
+  }
+
+  function pointerAngleFromEvent(evt) {
+    const rect = canvas.getBoundingClientRect();
+    const x = evt.clientX - rect.left - rect.width / 2;
+    const y = evt.clientY - rect.top - rect.height / 2;
+    const theta = Math.atan2(y, x) * 180 / Math.PI;
+    return normalize(theta + 90);
+  }
+
+  function nearestSpokeIndex(angle) {
+    const angles = spokeAngles();
+    let best = 0;
+    let bestDist = Infinity;
+    angles.forEach((a, i) => {
+      let d = Math.abs(a - angle);
+      if (d > 180) d = 360 - d;
+      if (d < bestDist) { bestDist = d; best = i; }
+    });
+    return best;
+  }
+
+  function onPointerDown(evt) {
+    dragging = true;
+    wrap.classList.add('dragging');
+    canvas.setPointerCapture(evt.pointerId);
+    const angle = pointerAngleFromEvent(evt);
+    dragIndex = nearestSpokeIndex(angle);
+    onPointerMove(evt);
+  }
+
+  function onPointerMove(evt) {
+    if (!dragging) return;
+    const angle = pointerAngleFromEvent(evt);
+    const spacing = 360 / spokeCount;
+    baseAngle = normalize(angle - dragIndex * spacing);
+    draw();
+    updateReadout();
+  }
+
+  function onPointerUp(evt) {
+    dragging = false;
+    wrap.classList.remove('dragging');
+    try { canvas.releasePointerCapture(evt.pointerId); } catch (e) {}
+  }
+
+  canvas.addEventListener('pointerdown', onPointerDown);
+  canvas.addEventListener('pointermove', onPointerMove);
+  canvas.addEventListener('pointerup', onPointerUp);
+  canvas.addEventListener('pointercancel', onPointerUp);
+
+  countInput.addEventListener('input', () => {
+    let n = parseInt(countInput.value, 10);
+    if (!Number.isFinite(n) || n < 1) n = 1;
+    if (n > 48) n = 48;
+    spokeCount = n;
+    draw();
+    updateReadout();
+  });
+
+  window.addEventListener('resize', resize);
+
+  const media = window.matchMedia('(prefers-color-scheme: dark)');
+  media.addEventListener('change', () => { draw(); });
+
+  resize();
+  updateReadout();
+})();
+</script>
