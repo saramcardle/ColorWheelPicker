@@ -241,6 +241,29 @@
     width: 32px;
   }
 
+  .copy-btn {
+    width: 100%;
+    padding: 12px 16px;
+    border-radius: 12px;
+    border: none;
+    background: var(--accent);
+    color: var(--surface);
+    font-family: "Manrope", ui-sans-serif, system-ui, sans-serif;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: opacity 0.15s ease;
+  }
+
+  .copy-btn:hover { opacity: 0.9; }
+  .copy-btn:active { opacity: 0.8; }
+  .copy-btn:disabled { opacity: 0.75; cursor: default; }
+
+  .copy-btn:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+  }
+
   @media (prefers-reduced-motion: reduce) {
     * { transition: none !important; }
   }
@@ -299,6 +322,9 @@
       </thead>
       <tbody id="readout-body"></tbody>
     </table>
+
+    <button type="button" class="copy-btn" id="copy-script-btn">Copy QuPath Script</button>
+    <p class="hint">Pastes a Groovy script that recolors these channels in QuPath</p>
   </div>
 </div>
 
@@ -317,12 +343,58 @@
   const labLuminosityReadout = document.getElementById('lab-luminosity-readout');
   const readoutBody = document.getElementById('readout-body');
   const angleReadout = document.getElementById('angle-readout');
+  const copyScriptBtn = document.getElementById('copy-script-btn');
 
   const LAB_HUE_OFFSET = 40; // aligns red near the top, matching the HSV wheel
   let wheelMode = 'hsv';
   let labL = 65; // lightness slice for the CIELAB wheel, tunable via slider
   let hsvValue = 1; // HSV value/brightness, tunable via slider
   let labMaxChromaTable = null;
+
+  let logicalSize = 340;
+  let dpr = Math.max(1, window.devicePixelRatio || 1);
+  let radius = logicalSize / 2 - 6;
+  let center = logicalSize / 2;
+  let wheelImage = null; // offscreen canvas holding the static hue/sat wheel
+
+  let spokeCount = 3;
+  let baseAngle = 0; // degrees, 0 = up, clockwise+
+  let dragging = false;
+  let dragIndex = 0;
+
+  function normalize(deg) {
+    let d = deg % 360;
+    if (d < 0) d += 360;
+    return d;
+  }
+
+  function spokeAngles() {
+    const spacing = 360 / spokeCount;
+    const angles = [];
+    for (let i = 0; i < spokeCount; i++) {
+      angles.push(normalize(baseAngle + i * spacing));
+    }
+    return angles;
+  }
+
+  function hsvToRgb(h, s, v) {
+    const c = v * s;
+    const hp = h / 60;
+    const x = c * (1 - Math.abs((hp % 2) - 1));
+    let r = 0, g = 0, b = 0;
+    if (hp >= 0 && hp < 1) { r = c; g = x; b = 0; }
+    else if (hp < 2) { r = x; g = c; b = 0; }
+    else if (hp < 3) { r = 0; g = c; b = x; }
+    else if (hp < 4) { r = 0; g = x; b = c; }
+    else if (hp < 5) { r = x; g = 0; b = c; }
+    else { r = c; g = 0; b = x; }
+    const m = v - c;
+    return [
+      Math.round((r + m) * 255),
+      Math.round((g + m) * 255),
+      Math.round((b + m) * 255)
+    ];
+  }
 
   function labToLinearSrgb(L, a, b) {
     const fy = (L + 16) / 116;
@@ -391,51 +463,6 @@
       return labHueToRgb(labHue, fraction * maxChromaForHue(labHue), labL);
     }
     return hsvToRgb(hueDeg, fraction, hsvValue);
-  }
-
-  let logicalSize = 340;
-  let dpr = Math.max(1, window.devicePixelRatio || 1);
-  let radius = logicalSize / 2 - 6;
-  let center = logicalSize / 2;
-  let wheelImage = null; // offscreen canvas holding the static hue/sat wheel
-
-  let spokeCount = 3;
-  let baseAngle = 0; // degrees, 0 = up, clockwise+
-  let dragging = false;
-  let dragIndex = 0;
-
-  function normalize(deg) {
-    let d = deg % 360;
-    if (d < 0) d += 360;
-    return d;
-  }
-
-  function spokeAngles() {
-    const spacing = 360 / spokeCount;
-    const angles = [];
-    for (let i = 0; i < spokeCount; i++) {
-      angles.push(normalize(baseAngle + i * spacing));
-    }
-    return angles;
-  }
-
-  function hsvToRgb(h, s, v) {
-    const c = v * s;
-    const hp = h / 60;
-    const x = c * (1 - Math.abs((hp % 2) - 1));
-    let r = 0, g = 0, b = 0;
-    if (hp >= 0 && hp < 1) { r = c; g = x; b = 0; }
-    else if (hp < 2) { r = x; g = c; b = 0; }
-    else if (hp < 3) { r = 0; g = c; b = x; }
-    else if (hp < 4) { r = 0; g = x; b = c; }
-    else if (hp < 5) { r = x; g = 0; b = c; }
-    else { r = c; g = 0; b = x; }
-    const m = v - c;
-    return [
-      Math.round((r + m) * 255),
-      Math.round((g + m) * 255),
-      Math.round((b + m) * 255)
-    ];
   }
 
   function toHex(rgb) {
@@ -633,6 +660,92 @@
     draw();
     updateReadout();
   });
+
+  function buildGroovyScript() {
+    const colorMapLines = spokeAngles()
+      .map((a, i) => {
+        const rgb = wheelPixelColor(a, 1);
+        return 'colorMap[' + (i + 1) + ']=[' + rgb[0] + ', ' + rgb[1] + ', ' + rgb[2] + ']';
+      })
+      .join('\n');
+
+    return [
+      'def colorMap = [:]',
+      colorMapLines,
+      '',
+      '',
+      'def viewer = getCurrentViewer()',
+      'def display = viewer.getImageDisplay()',
+      '',
+      'def chs = display.selectedChannels()',
+      'def allChs = display.availableChannels()',
+      'print(chs)',
+      'print(colorMap)',
+      '',
+      'if (chs.size()!=colorMap.size()) {',
+      "   print('unequal number of channels')",
+      '   return',
+      '}',
+      '',
+      'def LUTs = allChs.collect {',
+      '    if (chs.contains(it)) {',
+      '        rgb = colorMap[chs.indexOf(it)+1]',
+      '        Integer color = ColorTools.packRGB(rgb[0],rgb[1],rgb[2])',
+      '        LUT = color',
+      '        return LUT',
+      '    } else {',
+      '        return it.getColor()',
+      '    }',
+      '}',
+      '    ',
+      'setChannelColors(LUTs as Integer[])',
+      'viewer.repaint()',
+      '',
+      'import qupath.lib.common.ColorTools',
+      ''
+    ].join('\n');
+  }
+
+  function copyGroovyScript() {
+    const script = buildGroovyScript();
+    const originalLabel = copyScriptBtn.textContent;
+
+    function showFeedback(label) {
+      copyScriptBtn.textContent = label;
+      copyScriptBtn.disabled = true;
+      setTimeout(() => {
+        copyScriptBtn.textContent = originalLabel;
+        copyScriptBtn.disabled = false;
+      }, 1500);
+    }
+
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(script).then(
+        () => showFeedback('Copied!'),
+        () => fallbackCopy(script, showFeedback)
+      );
+    } else {
+      fallbackCopy(script, showFeedback);
+    }
+  }
+
+  function fallbackCopy(script, showFeedback) {
+    const textarea = document.createElement('textarea');
+    textarea.value = script;
+    textarea.style.position = 'fixed';
+    textarea.style.opacity = '0';
+    document.body.appendChild(textarea);
+    textarea.select();
+    try {
+      document.execCommand('copy');
+      showFeedback('Copied!');
+    } catch (err) {
+      showFeedback('Copy failed');
+    }
+    document.body.removeChild(textarea);
+  }
+
+  copyScriptBtn.addEventListener('click', copyGroovyScript);
 
   window.addEventListener('resize', resize);
 
