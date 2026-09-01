@@ -137,11 +137,39 @@
 
   .controls .spacer { flex: 1; }
 
+  .controls[hidden] { display: none; }
+
   .controls .angle-readout {
     font-family: "IBM Plex Mono", ui-monospace, monospace;
     font-size: 12px;
     color: var(--text-muted);
     font-variant-numeric: tabular-nums;
+  }
+
+  .controls select {
+    flex: 1;
+    padding: 9px 10px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--surface-sunken);
+    color: var(--text);
+    font-family: "Manrope", ui-sans-serif, system-ui, sans-serif;
+    font-size: 13px;
+  }
+
+  .controls select:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 1px;
+  }
+
+  .controls input[type="range"] {
+    flex: 1;
+    accent-color: var(--accent);
+  }
+
+  .controls input[type="range"]:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 3px;
   }
 
   .wheel-wrap {
@@ -227,6 +255,26 @@
 
   <div class="card">
     <div class="controls">
+      <label for="wheel-mode">Color model</label>
+      <select id="wheel-mode">
+        <option value="hsv">HSV (standard)</option>
+        <option value="cielab">CIELAB (perceptually uniform)</option>
+      </select>
+    </div>
+
+    <div class="controls" id="hsv-controls">
+      <label for="hsv-value">Value</label>
+      <input type="range" id="hsv-value" min="0" max="100" step="1" value="100" />
+      <span class="angle-readout" id="hsv-value-readout">100%</span>
+    </div>
+
+    <div class="controls" id="lab-controls" hidden>
+      <label for="lab-luminosity">Luminosity (L*)</label>
+      <input type="range" id="lab-luminosity" min="10" max="95" step="1" value="65" />
+      <span class="angle-readout" id="lab-luminosity-readout">65</span>
+    </div>
+
+    <div class="controls">
       <label for="spoke-count">Channels</label>
       <input id="spoke-count" type="number" min="1" max="48" step="1" value="3" inputmode="numeric" />
       <span class="spacer"></span>
@@ -260,8 +308,90 @@
   const wrap = document.getElementById('wheel-wrap');
   const ctx = canvas.getContext('2d');
   const countInput = document.getElementById('spoke-count');
+  const modeSelect = document.getElementById('wheel-mode');
+  const hsvControls = document.getElementById('hsv-controls');
+  const hsvValueSlider = document.getElementById('hsv-value');
+  const hsvValueReadout = document.getElementById('hsv-value-readout');
+  const labControls = document.getElementById('lab-controls');
+  const labLuminositySlider = document.getElementById('lab-luminosity');
+  const labLuminosityReadout = document.getElementById('lab-luminosity-readout');
   const readoutBody = document.getElementById('readout-body');
   const angleReadout = document.getElementById('angle-readout');
+
+  const LAB_HUE_OFFSET = 40; // aligns red near the top, matching the HSV wheel
+  let wheelMode = 'hsv';
+  let labL = 65; // lightness slice for the CIELAB wheel, tunable via slider
+  let hsvValue = 1; // HSV value/brightness, tunable via slider
+  let labMaxChromaTable = null;
+
+  function labToLinearSrgb(L, a, b) {
+    const fy = (L + 16) / 116;
+    const fx = fy + a / 500;
+    const fz = fy - b / 200;
+    const finv = t => (t > 6 / 29 ? t * t * t : 3 * (6 / 29) * (6 / 29) * (t - 4 / 29));
+    const X = 95.047 * finv(fx) / 100;
+    const Y = 100.0 * finv(fy) / 100;
+    const Z = 108.883 * finv(fz) / 100;
+    return [
+      3.2406 * X - 1.5372 * Y - 0.4986 * Z,
+      -0.9689 * X + 1.8758 * Y + 0.0415 * Z,
+      0.0557 * X - 0.2040 * Y + 1.0570 * Z
+    ];
+  }
+
+  function gammaCompand(c) {
+    return c <= 0.0031308 ? 12.92 * c : 1.055 * Math.pow(c, 1 / 2.4) - 0.055;
+  }
+
+  function linearInGamut(lin) {
+    const eps = 0.0008;
+    return lin.every(v => v >= -eps && v <= 1 + eps);
+  }
+
+  function labHueToRgb(hueDeg, chroma, L) {
+    const h = hueDeg * Math.PI / 180;
+    const lin = labToLinearSrgb(L, chroma * Math.cos(h), chroma * Math.sin(h));
+    return lin.map(v => Math.round(gammaCompand(Math.min(1, Math.max(0, v))) * 255));
+  }
+
+  function buildLabMaxChromaTable(L) {
+    const steps = 180;
+    const table = new Float32Array(steps + 1);
+    for (let i = 0; i <= steps; i++) {
+      const hueDeg = (i / steps) * 360;
+      const h = hueDeg * Math.PI / 180;
+      let lo = 0, hi = 200;
+      for (let iter = 0; iter < 24; iter++) {
+        const mid = (lo + hi) / 2;
+        const lin = labToLinearSrgb(L, mid * Math.cos(h), mid * Math.sin(h));
+        if (linearInGamut(lin)) lo = mid; else hi = mid;
+      }
+      table[i] = lo;
+    }
+    return table;
+  }
+
+  function ensureLabTable() {
+    if (!labMaxChromaTable) labMaxChromaTable = buildLabMaxChromaTable(labL);
+  }
+
+  function maxChromaForHue(hueDeg) {
+    const steps = labMaxChromaTable.length - 1;
+    const pos = (normalize(hueDeg) / 360) * steps;
+    const i0 = Math.floor(pos) % steps;
+    const i1 = (i0 + 1) % steps;
+    const frac = pos - Math.floor(pos);
+    return labMaxChromaTable[i0] * (1 - frac) + labMaxChromaTable[i1] * frac;
+  }
+
+  function wheelPixelColor(hueDeg, fraction) {
+    if (wheelMode === 'cielab') {
+      ensureLabTable();
+      const labHue = normalize(hueDeg + LAB_HUE_OFFSET);
+      return labHueToRgb(labHue, fraction * maxChromaForHue(labHue), labL);
+    }
+    return hsvToRgb(hueDeg, fraction, hsvValue);
+  }
 
   let logicalSize = 340;
   let dpr = Math.max(1, window.devicePixelRatio || 1);
@@ -333,7 +463,7 @@
           const theta = Math.atan2(dy, dx) * 180 / Math.PI;
           const hue = normalize(theta + 90);
           const sat = dist / r;
-          const [rr, gg, bb] = hsvToRgb(hue, sat, 1);
+          const [rr, gg, bb] = wheelPixelColor(hue, sat);
           img.data[idx] = rr;
           img.data[idx + 1] = gg;
           img.data[idx + 2] = bb;
@@ -406,7 +536,7 @@
     const angles = spokeAngles();
     readoutBody.innerHTML = '';
     angles.forEach((a, i) => {
-      const rgb = hsvToRgb(a, 1, 1);
+      const rgb = wheelPixelColor(a, 1);
       const hex = toHex(rgb);
       const tr = document.createElement('tr');
       tr.innerHTML =
@@ -468,6 +598,32 @@
   canvas.addEventListener('pointermove', onPointerMove);
   canvas.addEventListener('pointerup', onPointerUp);
   canvas.addEventListener('pointercancel', onPointerUp);
+
+  modeSelect.addEventListener('change', () => {
+    wheelMode = modeSelect.value;
+    hsvControls.hidden = wheelMode !== 'hsv';
+    labControls.hidden = wheelMode !== 'cielab';
+    buildWheelImage();
+    draw();
+    updateReadout();
+  });
+
+  hsvValueSlider.addEventListener('input', () => {
+    hsvValue = Number(hsvValueSlider.value) / 100;
+    hsvValueReadout.textContent = hsvValueSlider.value + '%';
+    buildWheelImage();
+    draw();
+    updateReadout();
+  });
+
+  labLuminositySlider.addEventListener('input', () => {
+    labL = Number(labLuminositySlider.value);
+    labLuminosityReadout.textContent = labLuminositySlider.value;
+    labMaxChromaTable = buildLabMaxChromaTable(labL);
+    buildWheelImage();
+    draw();
+    updateReadout();
+  });
 
   countInput.addEventListener('input', () => {
     let n = parseInt(countInput.value, 10);
